@@ -98,14 +98,14 @@ function durParts(ms) {
 function countdownLabel(p, now = Date.now()) {
   if (!p.dueAt) return 'Date TBA';
   const ms = Date.parse(p.dueAt) - now;
-  if (p.done) return p.type === 'exam' ? 'Done' : 'Submitted';
-  if (ms < 0) return p.type === 'homework' ? `${dur(-ms)} overdue` : 'Passed';
+  if (p.done || (ms < 0 && isTask(p))) return 'Done';
+  if (ms < 0) return 'Passed';
   return `in ${dur(ms)}`;
 }
 function urgency(p, now = Date.now()) {
   if (!p.dueAt || p.done) return '';
   const ms = Date.parse(p.dueAt) - now;
-  if (ms < 0) return p.type === 'homework' ? 'overdue' : 'past';
+  if (ms < 0) return 'past';
   if (ms < DAY) return 'today';
   if (ms < 3 * DAY) return 'soon';
   return '';
@@ -360,9 +360,6 @@ function rowMeta(p) {
   if (!p.dueAt && !isTask(p)) out.push(html`<span>${avatar(p.author, 'avatar-sm')}${p.author.name} · ${ago(p.createdAt)}</span>`);
   return out;
 }
-const doneButton = p => html`<button class="done-btn" type="button" data-action="toggle-done" data-id="${p.id}" aria-pressed="${bool(p.done)}"
-  aria-label="${p.done ? 'Mark as not done' : 'Mark as done'}" title="${p.done ? 'Done. Click to undo.' : 'Mark as done (only you see this)'}">${icon('check')}</button>`;
-
 function postRow(p, { now = Date.now(), showCourse = true, titleHtml = null } = {}) {
   const u = urgency(p, now);
   const side = p.dueAt
@@ -378,7 +375,6 @@ function postRow(p, { now = Date.now(), showCourse = true, titleHtml = null } = 
     </div>
     <div class="row-side">
       <div class="row-when">${side}<span class="row-stats">${stats(p)}</span></div>
-      ${isTask(p) ? doneButton(p) : ''}
     </div>
   </div>`;
 }
@@ -438,25 +434,20 @@ async function viewHome() {
   return { title: 'Up next', data, html: homeHtml };
 }
 
-// Sections in time order: overdue homework, then one per day ("Today", "Tomorrow", "In 8 days"), then undated.
+// Sections in time order: one per day ("Today", "Tomorrow", "In 8 days"), then undated.
+// Anything whose due time has passed is done for everyone and leaves the list.
 function groupUpcoming(items, now, showDone) {
   const today = startOfDay(new Date(now));
   const todayKey = ymd(today);
-  const overdue = [];
   const tba = [];
   const days = new Map();
   let hiddenDone = 0;
   for (const p of items) {
-    if (p.done && !showDone) {
-      if (!p.dueAt || Date.parse(p.dueAt) >= today.getTime()) hiddenDone++;
-      continue;
-    }
+    const passed = p.dueAt && Date.parse(p.dueAt) < now;
+    if (passed && dayKeyOf(p) !== todayKey) continue;
+    if ((p.done || passed) && !showDone) { hiddenDone++; continue; }
     if (!p.dueAt) { tba.push(p); continue; }
     const key = dayKeyOf(p);
-    if (Date.parse(p.dueAt) < now && key !== todayKey) {
-      if (p.type === 'homework' && !p.done) overdue.push(p);
-      continue;
-    }
     if (!days.has(key)) days.set(key, []);
     days.get(key).push(p);
   }
@@ -465,7 +456,6 @@ function groupUpcoming(items, now, showDone) {
     return n <= 0 ? 'Today' : n === 1 ? 'Tomorrow' : `In ${n} days`;
   };
   const sections = [];
-  if (overdue.length) sections.push({ key: 'overdue', title: 'Overdue', items: overdue });
   for (const key of [...days.keys()].sort()) sections.push({ key: `d-${key}`, title: dayTitle(key), items: days.get(key) });
   if (tba.length) sections.push({ key: 'tba', title: 'Date not announced', items: tba });
   return { sections, hiddenDone };
@@ -479,7 +469,6 @@ function homeSummary(items, now) {
   return {
     total: week.length, exams, homework: week.length - exams,
     later: open.filter(p => Date.parse(p.dueAt) >= weekEnd).length,
-    overdue: open.filter(p => p.type === 'homework' && Date.parse(p.dueAt) < now).length,
   };
 }
 
@@ -500,7 +489,6 @@ function homeHtml(data) {
   const subParts = [
     sum.exams && plural(sum.exams, 'exam'),
     sum.homework && `${sum.homework} homework`,
-    sum.overdue && `${sum.overdue} overdue`,
     sum.later && `${sum.later} more after that`,
   ].filter(Boolean);
   const next = data.upcoming.find(p => p.dueAt && !p.done && isTask(p) && Date.parse(p.dueAt) >= now);
@@ -510,7 +498,7 @@ function homeHtml(data) {
   const grouped = groupUpcoming(filtered, now, showDone);
   const hiddenDone = grouped.hiddenDone;
   const sections = grouped.sections.map(g => html`
-    <section class="group-${g.key === 'overdue' ? 'overdue' : 'day'}" aria-labelledby="g-${g.key}">
+    <section class="group-day" aria-labelledby="g-${g.key}">
       <div class="group-head"><h2 class="section-title" id="g-${g.key}">${g.title}</h2></div>
       <div class="list">${g.items.map(p => postRow(p, { now }))}</div>
     </section>`);
@@ -567,7 +555,6 @@ function heroHtml(p, now) {
     <div class="hero-side">
       <div class="hero-count" data-countdown="${p.dueAt}" aria-label="Time left: ${dur(ms)}">${countParts(ms)}</div>
       <div class="hero-caption">${p.type === 'exam' ? 'until the exam' : 'until it is due'}</div>
-      <button class="btn btn-sm hero-done" type="button" data-action="toggle-done" data-id="${p.id}" aria-pressed="false">${icon('check', 'i-sm')}${p.type === 'exam' ? 'Mark as done' : 'Mark as submitted'}</button>
     </div>
   </section>`;
 }
@@ -715,9 +702,9 @@ function courseHtml(data, type) {
 
 // ------------------------------------------------------------------ post page
 // Which reply box or comment edit is open on the current post. Kept outside the HTML so live refreshes redraw it.
-let postUi = { postId: null, reply: null, editing: null, scrolledTo: null, attach: { comment: [], reply: [] } };
+let postUi = { postId: null, reply: null, editing: null, scrolledTo: null, attach: { comment: [], reply: [], edit: [] } };
 async function viewPost(route) {
-  if (postUi.postId !== route.params[0]) postUi = { postId: route.params[0], reply: null, editing: null, scrolledTo: null, attach: { comment: [], reply: [] } };
+  if (postUi.postId !== route.params[0]) postUi = { postId: route.params[0], reply: null, editing: null, scrolledTo: null, attach: { comment: [], reply: [], edit: [] } };
   const data = await get(`/api/posts/${route.params[0]}`);
   return { title: data.post.title, data, html: postHtml, mount: mountPost };
 }
@@ -770,6 +757,35 @@ function voteHelp(p) {
   if (!p.up && !p.down) return 'Vote up if this matches what the instructor said. Vote down if something is wrong, and say what in a comment.';
   const verdict = score >= 3 ? ' Confirmed by classmates.' : score <= -2 ? ' Classmates think something is off. Check the comments.' : '';
   return `${p.up} up · ${p.down} down.${verdict}`;
+}
+// Done is shared: it happens when the due time passes, or early when enough classmates agree.
+function doneBox(d) {
+  const p = d.post;
+  const n = d.doneThreshold;
+  const voters = d.doneVoters || [];
+  const passed = p.dueAt && Date.parse(p.dueAt) <= Date.now();
+  if (passed || p.doneBy === 'time') {
+    return html`<section class="panel rail-card donebox is-done" aria-label="Done">
+      <div class="donebox-head">${icon('check')}<span>Done</span></div>
+      <p class="vote-help">The due time has passed, so this is done for the whole class.</p>
+    </section>`;
+  }
+  if (p.doneBy === 'votes') {
+    return html`<section class="panel rail-card donebox is-done" aria-label="Done">
+      <div class="donebox-head">${icon('check')}<span>Done</span></div>
+      <p class="vote-help">${voters.length} classmates agreed it's done: ${voters.map(v => v.name).join(', ')}.</p>
+    </section>`;
+  }
+  const left = Math.max(0, n - voters.length);
+  return html`<section class="panel rail-card donebox" aria-label="Mark as done">
+    <div class="donebox-top"><h2 class="section-title">Is it done?</h2><span class="num">${voters.length} of ${n}</span></div>
+    <div class="delbar donebar" style="--n:${n}" aria-hidden="true">${Array.from({ length: n }, (_, i) => html`<span class="${i < voters.length ? 'on' : ''}"></span>`)}</div>
+    ${voters.length ? html`<div class="who">Agreed so far: ${voters.map(v => v.name).join(', ')}</div>` : ''}
+    ${p.myDone
+      ? html`<button class="btn btn-block" type="button" data-action="toggle-done" data-id="${p.id}" data-done="0">Take back my vote</button>`
+      : html`<button class="btn btn-block btn-ok" type="button" data-action="toggle-done" data-id="${p.id}" data-done="1">${icon('check')}Mark as done</button>`}
+    <p class="vote-help">${voters.length ? (left === 1 ? 'One more student' : `${left} more students`) : `${n} students`} must agree before it's done early. It's done for everyone, and leaves Up next. After the due time it's done by itself.</p>
+  </section>`;
 }
 function deleteBox(d) {
   const p = d.post;
@@ -824,7 +840,9 @@ function commentItem(c, { threadId, isReply = false }) {
       <form class="comment-edit" data-form="edit-comment" data-id="${c.id}">
         <div class="mention-wrap"><label class="sr-only" for="edit-body-${c.id}">Edit your comment</label>
           <textarea class="textarea" id="edit-body-${c.id}" maxlength="2000" dir="auto">${c.body}</textarea></div>
+        <div class="up-list attach-list" id="attach-edit">${postUi.attach.edit.map(u => uploadRow(u, 'edit'))}</div>
         <div class="form-actions"><button class="btn btn-primary btn-sm" type="submit">Save</button>
+          ${attachButton('edit')}
           <button class="btn btn-ghost btn-sm" type="button" data-action="cancel-edit-comment">Cancel</button></div>
       </form>` : html`
       ${c.body ? html`<div class="comment-body">${richText(c.body, { mentions: c.mentions })}</div>` : ''}
@@ -843,7 +861,7 @@ function commentFiles(files) {
   const opens = f => /^(image\/|video\/|audio\/|application\/pdf|text\/plain)/.test(f.mime);
   return html`<div class="comment-files">
     ${files.filter(isImage).map(f => html`<a class="comment-thumb" href="${f.url}" target="_blank" rel="noopener" title="${f.name}"><img src="${f.url}" alt="${f.name}" loading="lazy"></a>`)}
-    ${files.filter(f => !isImage(f)).map(f => html`<a class="comment-file" href="${f.url}" ${raw(opens(f) ? 'target="_blank" rel="noopener"' : 'download')}><span class="file-icon">${extOf(f.name)}</span><span class="comment-file-name" dir="auto">${f.name}</span><span class="comment-file-size">${sizeText(f.size)}</span></a>`)}
+    ${files.filter(f => !isImage(f)).map(f => html`<a class="comment-file" href="${f.url}" title="${f.name} · ${sizeText(f.size)}" ${raw(opens(f) ? 'target="_blank" rel="noopener"' : 'download')}><span class="file-icon">${extOf(f.name)}</span><span class="comment-file-name" dir="auto">${f.name}</span><span class="comment-file-size">${sizeText(f.size)}</span></a>`)}
   </div>`;
 }
 const attachButton = kind => html`<label class="btn btn-ghost btn-sm attach-btn">${icon('clip', 'i-sm')}Attach<input type="file" class="sr-only" data-attach="${kind}" multiple aria-label="Attach files"></label>`;
@@ -964,11 +982,7 @@ function postHtml(d) {
         </div>
         <p class="vote-help">${voteHelp(p)}</p>
       </section>
-      ${isTask(p) ? html`<section class="panel rail-card">
-        <h2 class="section-title">Your progress</h2>
-        <button class="btn btn-block ${p.done ? 'btn-ok' : ''}" type="button" data-action="toggle-done" data-id="${p.id}" aria-pressed="${bool(p.done)}">${icon('check')}${p.done ? (p.type === 'exam' ? 'Done' : 'Submitted') : (p.type === 'exam' ? 'Mark as done' : 'Mark as submitted')}</button>
-        <p class="vote-help">Only you see this. Done items leave your Up next list.</p>
-      </section>` : ''}
+      ${isTask(p) ? doneBox(d) : ''}
       <section class="panel rail-card">
         <div class="rail-actions">
           <a class="btn btn-ghost" href="#/edit/${p.id}">${icon('edit')}Edit</a>
@@ -1304,7 +1318,7 @@ function uploadRow(u, kind = '') {
   return html`
   <div class="up-item ${u.status === 'error' ? 'is-error' : ''}" data-key="${u.key}">
     <span class="file-icon">${extOf(u.name)}</span>
-    <div class="file-main"><div class="file-name">${u.name}</div>
+    <div class="file-main"><div class="file-name" title="${u.name}">${u.name}</div>
       <div class="file-meta">${u.status === 'uploading' ? `Uploading… ${pct}%` : u.status === 'error' ? u.error : sizeText(u.size)}</div></div>
     <button class="icon-btn" type="button" data-action="${kind ? 'attach-remove' : 'remove-upload'}" data-kind="${kind}" data-key="${u.key}" aria-label="Remove ${u.name}">${icon('x')}</button>
     ${u.status === 'uploading' ? html`<span class="progress" style="--p:${pct}%"></span>` : ''}
@@ -2184,28 +2198,15 @@ function tick() {
 }
 
 // ------------------------------------------------------------------ actions
-function findPosts(data, id) {
-  const out = [];
-  if (!data) return out;
-  for (const k of ['upcoming', 'posts', 'announcements']) if (Array.isArray(data[k])) out.push(...data[k].filter(p => p.id === id));
-  if (data.post && data.post.id === id) out.push(data.post);
-  return out;
-}
-
 const actions = {
   async 'toggle-done'(el) {
-    const id = el.dataset.id;
-    const done = el.getAttribute('aria-pressed') !== 'true';
-    for (const b of $$(`[data-action="toggle-done"][data-id="${id}"]`)) b.setAttribute('aria-pressed', bool(done));
+    const done = el.dataset.done === '1';
+    el.disabled = true;
     try {
-      await api('PUT', `/api/posts/${id}/done`, { done });
-      for (const p of findPosts(state.view && state.view.data, id)) p.done = done;
-      if (done && state.route.name === 'home' && !store.get('showDone', false)) toast('Marked as done. Turn on "Show done" to see it again.');
-      if (state.view) setTimeout(() => { if (state.view) setViewData(state.view.data); }, done ? 350 : 0);
-    } catch (err) {
-      for (const b of $$(`[data-action="toggle-done"][data-id="${id}"]`)) b.setAttribute('aria-pressed', bool(!done));
-      toastError(err);
-    }
+      const d = await api('PUT', `/api/posts/${el.dataset.id}/done`, { done });
+      setViewData(d);
+      toast(d.post.done ? 'Done for the whole class.' : done ? 'Your vote was counted.' : 'Your vote was taken back.');
+    } catch (err) { el.disabled = false; toastError(err); await refreshCurrent(); }
   },
   async vote(el) {
     const id = el.dataset.id;
@@ -2275,12 +2276,15 @@ const actions = {
     renderAttach(kind);
   },
   'edit-comment'(el) {
+    const c = state.view.data.comments.find(x => x.id === el.dataset.id);
+    clearAttach('edit');
+    postUi.attach.edit = (c && c.files || []).map(f => ({ key: f.id, id: f.id, name: f.name, size: f.size, status: 'done' }));
     postUi.editing = el.dataset.id;
     postUi.reply = null;
     paint(state.view, true);
     focusEnd($(`#edit-body-${el.dataset.id}`));
   },
-  'cancel-edit-comment'() { postUi.editing = null; paint(state.view, true); },
+  'cancel-edit-comment'() { postUi.editing = null; clearAttach('edit'); paint(state.view, true); },
   async 'comment-delete'(el) {
     if (!armed(el, 'Confirm delete')) return;
     try { await api('DELETE', `/api/comments/${el.dataset.id}`); toast('Comment deleted.'); refreshCurrent(); } catch (err) { toastError(err); }
@@ -2423,12 +2427,14 @@ const forms = {
   async 'edit-comment'(f) {
     const ta = $('textarea', f);
     const body = ta.value.trim();
-    const c = state.view.data.comments && state.view.data.comments.find(x => x.id === f.dataset.id);
-    if (!body && !(c && c.files && c.files.length)) { ta.focus(); return; }
+    const fileIds = readyAttach('edit');
+    if (!fileIds) return;
+    if (!body && !fileIds.length) { ta.focus(); return; }
     busy(f, true);
     try {
-      await api('PATCH', `/api/comments/${f.dataset.id}`, { body });
+      await api('PATCH', `/api/comments/${f.dataset.id}`, { body, fileIds });
       postUi.editing = null;
+      postUi.attach.edit = [];
       paint(state.view, true);
       await refreshCurrent();
     } catch (err) { toastError(err); busy(f, false); }

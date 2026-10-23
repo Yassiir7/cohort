@@ -19,6 +19,7 @@ const config = {
   appName: (process.env.APP_NAME || 'Cohort').trim().slice(0, 40) || 'Cohort',
   joinCode: (process.env.JOIN_CODE || '').trim(),
   deleteVotes: Math.max(1, parseInt(process.env.DELETE_VOTES, 10) || 5),
+  doneVotes: Math.max(1, parseInt(process.env.DONE_VOTES, 10) || 6),
   maxUploadMB: Math.max(1, parseInt(process.env.MAX_UPLOAD_MB, 10) || 25),
   trustProxy: /^(1|true|yes)$/i.test(process.env.TRUST_PROXY || ''),
   publicUrl: (process.env.PUBLIC_URL || '').replace(/\/+$/, ''),
@@ -307,13 +308,22 @@ const POST_FIELDS = `p.id, p.course_id, p.type, p.title, p.due_at, p.has_time, p
   (SELECT COUNT(*) FROM comments m WHERE m.post_id = p.id AND m.deleted_at IS NULL) AS comment_count,
   (SELECT COUNT(*) FROM files f WHERE f.post_id = p.id AND f.removed_at IS NULL) AS file_count,
   (SELECT COUNT(*) FROM delete_votes d WHERE d.post_id = p.id) AS delete_count,
-  EXISTS (SELECT 1 FROM done x WHERE x.post_id = p.id AND x.student_id = $me) AS done`;
+  (SELECT COUNT(*) FROM done x WHERE x.post_id = p.id) AS done_count,
+  EXISTS (SELECT 1 FROM done x WHERE x.post_id = p.id AND x.student_id = $me) AS my_done`;
 const POST_FROM = `FROM posts p
   JOIN students a ON a.id = p.created_by
   JOIN courses c ON c.id = p.course_id
   LEFT JOIN students e ON e.id = p.last_edited_by`;
 
+// Done is shared by the whole class: once the due time passes, or once enough students agree it's done early.
+function doneReason(p, doneCount) {
+  if (p.due_at && Date.parse(p.due_at) <= Date.now()) return 'time';
+  if (doneCount >= config.doneVotes) return 'votes';
+  return null;
+}
+
 function postSummary(r) {
+  const doneBy = doneReason(r, r.done_count);
   return {
     id: r.id, courseId: r.course_id, type: r.type, title: r.title,
     dueAt: r.due_at, hasTime: !!r.has_time, dueDate: r.due_date, location: r.location, weight: r.weight,
@@ -324,7 +334,8 @@ function postSummary(r) {
     editor: r.last_edited_by ? { id: r.last_edited_by, name: r.editor_name, color: r.editor_color } : null,
     course: { id: r.course_id, code: r.course_code, name: r.course_name, color: r.course_color },
     up: r.up, down: r.down, myVote: r.my_vote || 0,
-    comments: r.comment_count, files: r.file_count, deleteVotes: r.delete_count, done: !!r.done,
+    comments: r.comment_count, files: r.file_count, deleteVotes: r.delete_count,
+    done: !!doneBy, doneBy, doneVotes: r.done_count, myDone: !!r.my_done,
   };
 }
 
@@ -367,7 +378,9 @@ function postDetail(id, meId) {
     byComment.get(f.comment_id).push(fileShape(f));
   }
   comments = comments.map(m => commentShape(m, meId, byComment.get(m.id)));
-  return { post, files, comments, deleteVotes: deleteVotesFor(id, meId), threshold: config.deleteVotes };
+  const doneVoters = db.all(`SELECT s.id, s.name, s.color FROM done x JOIN students s ON s.id = x.student_id
+                             WHERE x.post_id = $id ORDER BY x.created_at`, { id });
+  return { post, files, comments, deleteVotes: deleteVotesFor(id, meId), threshold: config.deleteVotes, doneVoters, doneThreshold: config.doneVotes };
 }
 
 function commentShape(m, meId, files) {
@@ -854,11 +867,18 @@ route('PUT', '/api/posts/:id/vote', ({ me, params, body }) => {
   return { up: row.up, down: row.down, myVote: value };
 });
 
+// Marking done early is a vote; the post is done for everyone once enough students agree.
 route('PUT', '/api/posts/:id/done', ({ me, params, body }) => {
   const post = livePost(params.id);
+  if (post.type !== 'exam' && post.type !== 'homework') fail(400, 'Only exams and homework can be marked done.');
+  const count = () => db.one('SELECT COUNT(*) AS n FROM done WHERE post_id = $post', { post: post.id }).n;
+  const reason = doneReason(post, count());
+  if (reason === 'time') fail(409, 'The due time has passed, so this is already done.');
+  if (reason === 'votes') fail(409, 'Enough classmates agreed. This is already done.');
   if (body.done) db.run('INSERT OR IGNORE INTO done (post_id, student_id, created_at) VALUES ($post, $me, $t)', { post: post.id, me: me.id, t: nowIso() });
   else db.run('DELETE FROM done WHERE post_id = $post AND student_id = $me', { post: post.id, me: me.id });
-  return { done: !!body.done };
+  broadcast({ t: 'post', courseId: post.course_id, postId: post.id });
+  return postDetail(post.id, me.id);
 });
 
 // Replies stay one level deep: answering a reply joins the same thread, and its author is still notified.
@@ -903,8 +923,29 @@ route('PATCH', '/api/comments/:id', ({ me, params, body }) => {
   if (!c) fail(404, 'This comment does not exist.');
   if (c.student_id !== me.id) fail(403, 'You can only edit your own comments.');
   if (c.post_deleted) fail(410, 'This post was deleted.');
-  const files = db.all('SELECT name FROM files WHERE comment_id = $id AND removed_at IS NULL', { id: c.id });
+  // fileIds, when sent, is the full list to keep: files left out are removed, new uploads are added.
+  const current = db.all('SELECT * FROM files WHERE comment_id = $id AND removed_at IS NULL ORDER BY created_at', { id: c.id });
+  let files = current;
+  let added = [], removed = [];
+  if (body.fileIds !== undefined) {
+    if (!Array.isArray(body.fileIds)) fail(400, 'Attachments are not valid.');
+    const wanted = [...new Set(body.fileIds.map(String))];
+    const currentIds = new Set(current.map(f => f.id));
+    added = resolveCommentFiles(wanted.filter(id => !currentIds.has(id)), me.id);
+    removed = current.filter(f => !wanted.includes(f.id));
+    files = [...current.filter(f => wanted.includes(f.id)), ...added];
+    if (files.length > 6) fail(400, 'A comment can have at most 6 files.');
+  }
   const content = text(body.body, 'Comment', { min: files.length ? 0 : 1, max: 2000, multiline: true });
+  if (added.length || removed.length) {
+    db.tx(() => {
+      const t = nowIso();
+      for (const f of added) db.run('UPDATE files SET comment_id = $c WHERE id = $id', { c: c.id, id: f.id });
+      for (const f of removed) db.run('UPDATE files SET removed_at = $t WHERE id = $id', { t, id: f.id });
+      if (content === c.body) db.run('UPDATE comments SET edited_at = $t WHERE id = $id', { t, id: c.id });
+    });
+    if (content === c.body) broadcast({ t: 'comment', courseId: c.course_id, postId: c.post_id });
+  }
   if (content !== c.body) {
     const mentions = findMentions(content);
     const before = new Set(JSON.parse(c.mentions || '[]').map(m => m.id));

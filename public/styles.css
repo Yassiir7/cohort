@@ -654,24 +654,6 @@ a.course-chip:hover { color: var(--ink); }
 [data-urgency="overdue"] .countdown { color: var(--danger); }
 [data-urgency="past"] .countdown { color: var(--ink-3); }
 
-.done-btn {
-  position: relative;
-  z-index: 1;
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  border: 1.5px solid var(--line-2);
-  background: var(--surface);
-  color: transparent;
-  display: grid;
-  place-items: center;
-  padding: 0;
-  flex: none;
-  transition: background-color .12s, border-color .12s, color .12s;
-}
-.done-btn .i { stroke-width: 2.6; width: 16px; height: 16px; }
-.done-btn:hover { border-color: var(--ok); color: var(--ok); }
-.done-btn[aria-pressed="true"] { background: var(--ok); border-color: var(--ok); color: var(--ok-ink); }
 .row.is-done .row-title { text-decoration: line-through; text-decoration-thickness: 1.5px; color: var(--ink-3); }
 .row.is-done .date-block, .row.is-done .row-top, .row.is-done .countdown { opacity: .55; }
 
@@ -741,8 +723,6 @@ a.course-chip:hover { color: var(--ink); }
 .hero.is-urgent .hero-count b { background: linear-gradient(transparent 52%, var(--hl-homework) 52% 94%, transparent 94%); }
 .hero-caption { font: 500 12px/1 var(--font-mono); color: var(--ink-3); text-align: right; margin-top: 8px; }
 .hero-side { display: grid; justify-items: end; }
-.hero-done { position: relative; z-index: 1; margin-top: 14px; }
-.hero-done[aria-pressed="true"] { background: var(--ok); border-color: var(--ok); color: var(--ok-ink); }
 .hero-clear { padding: 20px 24px; display: flex; gap: 14px; align-items: center; }
 .hero-clear .i { color: var(--ok); width: 26px; height: 26px; }
 
@@ -979,6 +959,17 @@ details.fold > .fold-body { margin-top: 10px; }
 .delbar { display: grid; grid-template-columns: repeat(var(--n, 5), minmax(0, 1fr)); gap: 4px; }
 .delbar span { height: 7px; border-radius: 2px; background: var(--danger-track); }
 .delbar span.on { background: var(--danger); }
+.donebox { display: grid; gap: 10px; }
+.donebox-top { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+.donebox-top .section-title { margin: 0; }
+.donebox-top .num { font: 600 13px/1 var(--font-mono); color: var(--ok); }
+.donebar span { background: color-mix(in srgb, var(--ok) 22%, var(--sunken)); }
+.donebar span.on { background: var(--ok); }
+.donebox .who { font-size: 12.5px; color: var(--ink-2); }
+.donebox .vote-help { margin: 0; }
+.donebox.is-done { border-color: color-mix(in srgb, var(--ok) 40%, var(--line)); background: color-mix(in srgb, var(--ok) 7%, var(--surface)); }
+.donebox-head { display: flex; align-items: center; gap: 8px; color: var(--ok); font-weight: 700; font-size: 16px; }
+.donebox-head .i { width: 20px; height: 20px; stroke-width: 2.6; }
 .delbox q { font-style: normal; color: var(--ink); quotes: "“" "”"; overflow-wrap: anywhere; }
 .delbox .who { font-size: 12.5px; color: var(--ink-2); }
 .delbox .voters { display: flex; flex-wrap: wrap; gap: 4px; }
@@ -1023,14 +1014,21 @@ details.fold > .fold-body { margin-top: 10px; }
 .attach-btn { cursor: pointer; }
 .attach-btn:focus-within { outline: 2px solid var(--focus); outline-offset: 2px; }
 .attach-list:not(:empty) { margin-top: 8px; }
-.comment-files { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px; margin-top: 8px; }
-.comment-thumb { display: block; width: 120px; height: 90px; border-radius: var(--r-2); overflow: hidden; border: 1px solid var(--line); background: var(--sunken); }
+/* Compact chips that sit side by side and wrap inside the text column; long names are cut and shown in full on hover. */
+.up-list.attach-list { display: flex; flex-wrap: wrap; gap: 6px; }
+.attach-list .up-item { width: 200px; max-width: 100%; grid-template-columns: 26px minmax(0, 1fr) auto; gap: 8px; padding: 4px 4px 4px 6px; }
+.attach-list .file-icon { width: 26px; height: 26px; font-size: 8.5px; }
+.attach-list .file-name { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.attach-list .file-meta { font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.attach-list .icon-btn { width: 26px; height: 26px; }
+.comment-files { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 6px; max-width: 100%; }
+.comment-thumb { display: block; width: 64px; height: 48px; border-radius: 6px; overflow: hidden; border: 1px solid var(--line); background: var(--sunken); }
 .comment-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.comment-file { display: inline-flex; align-items: center; gap: 10px; max-width: 100%; padding: 6px 12px 6px 6px; border: 1px solid var(--line); border-radius: var(--r-2); background: var(--surface); color: var(--ink); text-decoration: none; font-size: 13.5px; }
+.comment-file { display: inline-flex; align-items: center; gap: 6px; width: 180px; max-width: 100%; height: 34px; padding: 0 8px 0 4px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--ink); text-decoration: none; font-size: 12.5px; }
 .comment-file:hover { border-color: var(--line-2); background: var(--surface-2); color: var(--ink); }
-.comment-file .file-icon { width: 30px; height: 30px; flex: none; }
-.comment-file-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
-.comment-file-size { flex: none; color: var(--ink-3); font-size: 12px; }
+.comment-file .file-icon { width: 24px; height: 24px; flex: none; font-size: 8px; border-radius: 4px; }
+.comment-file-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+.comment-file-size { flex: none; color: var(--ink-3); font-size: 11px; }
 
 .tombstone { max-width: 680px; }
 .tombstone .post-title { text-decoration: line-through; text-decoration-thickness: 2px; color: var(--ink-3); }
@@ -1451,7 +1449,6 @@ button.crumb { border: 0; background: none; padding: 0; font-weight: 500; color:
   .row > .row-main { grid-area: main; }
   .row-side, .row-when { display: contents; }
   .row .countdown { grid-area: when; justify-self: start; margin-top: 6px; }
-  .row .done-btn { grid-area: side; align-self: center; }
   .row .row-stats { display: none; }
   .date-block { height: 52px; }
   .date-block .dom { font-size: 20px; }
