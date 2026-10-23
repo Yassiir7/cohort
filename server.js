@@ -261,7 +261,7 @@ function meShape(s, session = null) {
   const tracked = db.all('SELECT course_id FROM tracks WHERE student_id = $id ORDER BY created_at', { id: s.id }).map(r => r.course_id);
   return {
     id: s.id, name: s.name, color: s.color, feedToken: s.feed_token, tracked, prevVisitAt: s.prev_visit_at, createdAt: s.created_at,
-    hasPassword: !!s.password_hash, viaKey: !!(session && session.viaKey),
+    hasPassword: !!s.password_hash, viaKey: !!(session && session.viaKey), theme: s.theme || null,
   };
 }
 const studentById = id => db.one('SELECT * FROM students WHERE id = $id', { id });
@@ -645,6 +645,13 @@ route('GET', '/api/me', ctx => {
   db.run(`UPDATE students SET ${newVisit ? 'prev_visit_at = last_active_at, ' : ''}last_active_at = $now WHERE id = $id`, { now: isoAt(t), id: me.id });
   if (session && session.persistent) ctx.cookies.push(sessionCookie(ctx.req, session.token, true));
   return meShape(studentById(me.id), session);
+});
+
+// The light/dark choice follows the account to every device.
+route('PUT', '/api/me/theme', ({ me, body }) => {
+  if (!['system', 'light', 'dark'].includes(body.theme)) fail(400, 'Pick system, light or dark.');
+  db.run('UPDATE students SET theme = $t WHERE id = $id', { t: body.theme, id: me.id });
+  return { theme: body.theme };
 });
 
 route('PATCH', '/api/me', ({ me, body, session }) => {

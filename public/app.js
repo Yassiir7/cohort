@@ -1738,7 +1738,7 @@ async function addToHome() {
 
 function profileDialog() {
   const me = state.me;
-  const theme = store.get('theme', 'system');
+  const theme = currentTheme();
   const invite = `${location.origin}/`;
   openDialog('Your profile', html`
     <section class="dlg-section">
@@ -1923,6 +1923,9 @@ function joinPrompt() {
 }
 function signedIn(me) {
   state.me = me;
+  // A new account keeps the look chosen before signing up; an existing one brings its own.
+  if (me.theme) useAccountTheme(me);
+  else if (store.get('theme', null)) api('PUT', '/api/me/theme', { theme: currentTheme() }).then(() => { me.theme = currentTheme(); }).catch(() => {});
   state.guest = false;
   store.del('browse');
   store.set('lastUser', me.name);
@@ -2350,6 +2353,7 @@ const actions = {
     store.set('theme', t);
     applyTheme(t);
     for (const b of $$('[data-action="theme"]')) b.setAttribute('aria-pressed', bool(b.dataset.value === t));
+    if (state.me) api('PUT', '/api/me/theme', { theme: t }).then(() => { state.me.theme = t; }).catch(toastError);
   },
   'auth-mode'(el) { $('#welcome-card').innerHTML = authCard(el.dataset.mode).s; focusAuth(); },
   'toggle-pw'(el) {
@@ -2578,6 +2582,13 @@ const forms = {
 };
 
 // ------------------------------------------------------------------ boot
+// New visitors start in light mode; a choice is kept on the device and, once signed in, on the account.
+const currentTheme = () => store.get('theme', 'light');
+function useAccountTheme(me) {
+  if (!me || !me.theme) return;
+  store.set('theme', me.theme);
+  applyTheme(me.theme);
+}
 function applyTheme(t) {
   const root = document.documentElement;
   if (t === 'light' || t === 'dark') root.setAttribute('data-theme', t); else root.removeAttribute('data-theme');
@@ -2640,13 +2651,13 @@ document.addEventListener('keydown', e => {
   else if (state.me || state.guest) { e.preventDefault(); location.hash = '#/search'; }
 });
 dlg().addEventListener('click', e => { if (e.target === dlg()) closeDialog(); });
-matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => applyTheme(store.get('theme', 'system')));
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => applyTheme(currentTheme()));
 
 function fatal(message) {
   $('#app').innerHTML = html`<div class="fatal"><h1 class="page-title">Can't load ${appName()}</h1><p class="page-sub">${message}</p></div>`.s;
 }
 async function boot() {
-  applyTheme(store.get('theme', 'system'));
+  applyTheme(currentTheme());
   try {
     state.config = await (await fetch('/api/config')).json();
   } catch {
@@ -2657,6 +2668,7 @@ async function boot() {
   if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('/sw.js').catch(() => {});
   try {
     state.me = await api('GET', '/api/me', undefined, { allow401: true });
+    useAccountTheme(state.me);
     clearLegacyKey();
     startApp();
     return;

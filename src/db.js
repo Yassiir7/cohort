@@ -178,6 +178,7 @@ function openDb(file) {
   addColumn('comments', 'edited_at', 'TEXT');
   db.exec('CREATE INDEX IF NOT EXISTS comments_parent ON comments(parent_id)');
   addColumn('files', 'comment_id', 'TEXT');
+  addColumn('students', 'theme', 'TEXT');
   db.exec('CREATE INDEX IF NOT EXISTS files_comment ON files(comment_id)');
   addColumn('students', 'username_key', 'TEXT');
   addColumn('students', 'password_hash', 'TEXT');
