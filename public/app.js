@@ -777,13 +777,14 @@ function doneBox(d) {
     </section>`;
   }
   const left = Math.max(0, n - voters.length);
-  return html`<section class="panel rail-card donebox" aria-label="Mark as done">
+  // Gray while nobody has voted, yellow once someone has, green when it's done.
+  return html`<section class="panel rail-card donebox ${voters.length ? 'is-some' : ''}" aria-label="Mark as done">
     <div class="donebox-top"><h2 class="section-title">Is it done?</h2><span class="num">${voters.length} of ${n}</span></div>
     <div class="delbar donebar" style="--n:${n}" aria-hidden="true">${Array.from({ length: n }, (_, i) => html`<span class="${i < voters.length ? 'on' : ''}"></span>`)}</div>
     ${voters.length ? html`<div class="who">Agreed so far: ${voters.map(v => v.name).join(', ')}</div>` : ''}
     ${p.myDone
-      ? html`<button class="btn btn-block" type="button" data-action="toggle-done" data-id="${p.id}" data-done="0">Take back my vote</button>`
-      : html`<button class="btn btn-block btn-ok" type="button" data-action="toggle-done" data-id="${p.id}" data-done="1">${icon('check')}Mark as done</button>`}
+      ? html`<button class="btn btn-block btn-vote" type="button" data-action="toggle-done" data-id="${p.id}" data-done="0">Take back my vote</button>`
+      : html`<button class="btn btn-block ${voters.length ? 'btn-vote' : ''}" type="button" data-action="toggle-done" data-id="${p.id}" data-done="1">${icon('check')}Mark as done</button>`}
     <p class="vote-help">${voters.length ? (left === 1 ? 'One more student' : `${left} more students`) : `${n} students`} must agree before it's done early. It's done for everyone, and leaves Up next. After the due time it's done by itself.</p>
   </section>`;
 }
