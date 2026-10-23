@@ -750,6 +750,20 @@ a.course-chip:hover { color: var(--ink); }
 .group-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
 .group-head .section-title { margin: 0; }
 .group-overdue .section-title { color: var(--danger); }
+/* Up next timeline: each day hangs off one thin line in the accent color */
+.agenda { --timeline: color-mix(in srgb, var(--accent) 24%, var(--paper)); position: relative; padding-left: 34px; }
+.agenda::before { content: ""; position: absolute; left: 6px; top: 6px; bottom: 6px; width: 2px; background: var(--timeline); }
+.agenda > section { position: relative; }
+.agenda .group-head { position: relative; }
+.agenda .group-head::before {
+  content: ""; position: absolute; left: -34px; top: 50%; translate: 0 -50%;
+  width: 14px; height: 14px; border-radius: 50%; box-sizing: border-box; background: var(--paper); border: 3px solid var(--accent);
+}
+.agenda .group-head .section-title { font-size: 12.5px; color: var(--ink); }
+.agenda .group-overdue .section-title { color: var(--danger); }
+.agenda .group-overdue .group-head::before { border-color: var(--danger); background: var(--danger); }
+.agenda > section:first-of-type:not(.group-overdue) .group-head::before { background: var(--accent); box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 18%, transparent); }
+.agenda .hidden-note, .agenda > .note { margin-left: 0; }
 .hidden-note { font-size: 13px; color: var(--ink-3); }
 .hidden-note button { border: 0; background: none; padding: 0; color: var(--accent); font-weight: 500; }
 
@@ -1450,4 +1464,10 @@ button.crumb { border: 0; background: none; padding: 0; font-weight: 500; color:
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+}
+
+@media (max-width: 760px) {
+  .agenda { padding-left: 24px; }
+  .agenda::before { left: 5px; }
+  .agenda .group-head::before { left: -24px; width: 12px; height: 12px; }
 }
