@@ -75,8 +75,10 @@ const commands = {
     const course = db.one('SELECT id, code, name FROM courses WHERE id = $id', { id });
     if (!course) throw new Error('No course with that id.');
     const posts = db.all('SELECT id FROM posts WHERE course_id = $id', { id });
-    const files = db.all('SELECT f.id FROM files f JOIN posts p ON p.id = f.post_id WHERE p.course_id = $id', { id });
+    const files = db.all(`SELECT f.id FROM files f JOIN posts p ON p.id = f.post_id WHERE p.course_id = $id
+      UNION SELECT f.id FROM files f JOIN comments m ON m.id = f.comment_id JOIN posts p ON p.id = m.post_id WHERE p.course_id = $id`, { id });
     db.tx(() => {
+      db.run('DELETE FROM files WHERE comment_id IN (SELECT m.id FROM comments m JOIN posts p ON p.id = m.post_id WHERE p.course_id = $id)', { id });
       for (const t of ['revisions', 'votes', 'comments', 'done', 'delete_votes', 'files']) {
         db.run(`DELETE FROM ${t} WHERE post_id IN (SELECT id FROM posts WHERE course_id = $id)`, { id });
       }

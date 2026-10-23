@@ -715,9 +715,9 @@ function courseHtml(data, type) {
 
 // ------------------------------------------------------------------ post page
 // Which reply box or comment edit is open on the current post. Kept outside the HTML so live refreshes redraw it.
-let postUi = { postId: null, reply: null, editing: null, scrolledTo: null };
+let postUi = { postId: null, reply: null, editing: null, scrolledTo: null, attach: { comment: [], reply: [] } };
 async function viewPost(route) {
-  if (postUi.postId !== route.params[0]) postUi = { postId: route.params[0], reply: null, editing: null, scrolledTo: null };
+  if (postUi.postId !== route.params[0]) postUi = { postId: route.params[0], reply: null, editing: null, scrolledTo: null, attach: { comment: [], reply: [] } };
   const data = await get(`/api/posts/${route.params[0]}`);
   return { title: data.post.title, data, html: postHtml, mount: mountPost };
 }
@@ -827,7 +827,8 @@ function commentItem(c, { threadId, isReply = false }) {
         <div class="form-actions"><button class="btn btn-primary btn-sm" type="submit">Save</button>
           <button class="btn btn-ghost btn-sm" type="button" data-action="cancel-edit-comment">Cancel</button></div>
       </form>` : html`
-      <div class="comment-body">${richText(c.body, { mentions: c.mentions })}</div>
+      ${c.body ? html`<div class="comment-body">${richText(c.body, { mentions: c.mentions })}</div>` : ''}
+      ${c.files && c.files.length ? commentFiles(c.files) : ''}
       <div class="comment-actions">
         <button class="linkish-sm" type="button" data-action="reply" data-thread="${threadId}" data-parent="${c.id}" data-name="${isReply && !c.mine ? c.author.name : ''}">${icon('reply', 'i-sm')}Reply</button>
         ${c.mine ? html`<button class="linkish-sm" type="button" data-action="edit-comment" data-id="${c.id}">${icon('edit', 'i-sm')}Edit</button>
@@ -836,6 +837,48 @@ function commentItem(c, { threadId, isReply = false }) {
     </div>
   </div>`;
 }
+// Files on a comment: pictures as small previews, everything else as a compact link.
+function commentFiles(files) {
+  const isImage = f => /^image\/(png|jpeg|gif|webp)$/.test(f.mime);
+  const opens = f => /^(image\/|video\/|audio\/|application\/pdf|text\/plain)/.test(f.mime);
+  return html`<div class="comment-files">
+    ${files.filter(isImage).map(f => html`<a class="comment-thumb" href="${f.url}" target="_blank" rel="noopener" title="${f.name}"><img src="${f.url}" alt="${f.name}" loading="lazy"></a>`)}
+    ${files.filter(f => !isImage(f)).map(f => html`<a class="comment-file" href="${f.url}" ${raw(opens(f) ? 'target="_blank" rel="noopener"' : 'download')}><span class="file-icon">${extOf(f.name)}</span><span class="comment-file-name" dir="auto">${f.name}</span><span class="comment-file-size">${sizeText(f.size)}</span></a>`)}
+  </div>`;
+}
+const attachButton = kind => html`<label class="btn btn-ghost btn-sm attach-btn">${icon('clip', 'i-sm')}Attach<input type="file" class="sr-only" data-attach="${kind}" multiple aria-label="Attach files"></label>`;
+function renderAttach(kind) {
+  const list = $(`#attach-${kind}`);
+  if (list) list.innerHTML = postUi.attach[kind].map(u => uploadRow(u, kind).s).join('');
+}
+function addAttachFiles(kind, fileList) {
+  const max = state.config.maxUploadMB * 1048576;
+  const list = postUi.attach[kind];
+  for (const file of fileList) {
+    if (list.length >= 6) { toast('A comment can have at most 6 files.', true); break; }
+    const u = { key: 'u' + Math.random().toString(36).slice(2), name: file.name || 'pasted-image.png', size: file.size, status: 'uploading', progress: 0 };
+    list.push(u);
+    if (file.size > max) { Object.assign(u, { status: 'error', error: `Too large. Files can be at most ${state.config.maxUploadMB} MB.` }); continue; }
+    if (!file.size) { Object.assign(u, { status: 'error', error: 'This file is empty.' }); continue; }
+    const { promise, xhr } = uploadFile(file, p => { u.progress = p; paintUploadProgress(u); });
+    u.xhr = xhr;
+    promise
+      .then(r => Object.assign(u, { id: r.id, size: r.size, status: 'done' }))
+      .catch(err => Object.assign(u, { status: 'error', error: err.message }))
+      .finally(() => { u.xhr = null; renderAttach(kind); });
+  }
+  renderAttach(kind);
+}
+function clearAttach(kind) {
+  for (const u of postUi.attach[kind]) if (u.xhr) u.xhr.abort();
+  postUi.attach[kind] = [];
+}
+// The ids of finished uploads, or null (with a message) while some are still uploading.
+function readyAttach(kind) {
+  const list = postUi.attach[kind];
+  if (list.some(u => u.status === 'uploading')) { toast('Wait until the files finish uploading.', true); return null; }
+  return list.filter(u => u.status === 'done').map(u => u.id);
+}
 function replyForm(threadId, parentId, prefill) {
   return html`
   <form class="reply-form" data-form="reply" data-post="${postUi.postId}" data-parent="${parentId}">
@@ -843,7 +886,9 @@ function replyForm(threadId, parentId, prefill) {
     <div class="comment-main">
       <div class="mention-wrap"><label class="sr-only" for="reply-body-${threadId}">Write a reply</label>
         <textarea class="textarea" id="reply-body-${threadId}" maxlength="2000" dir="auto" placeholder="Write a reply">${prefill}</textarea></div>
+      <div class="up-list attach-list" id="attach-reply">${postUi.attach.reply.map(u => uploadRow(u, 'reply'))}</div>
       <div class="form-actions"><button class="btn btn-primary btn-sm" type="submit">${icon('reply', 'i-sm')}Reply</button>
+        ${attachButton('reply')}
         <button class="btn btn-ghost btn-sm" type="button" data-action="cancel-reply">Cancel</button></div>
     </div>
   </form>`;
@@ -868,7 +913,9 @@ function commentsHtml(d) {
     <div>
       <div class="mention-wrap"><label class="sr-only" for="comment-body">Write a comment</label>
         <textarea class="textarea" id="comment-body" placeholder="Add a comment or ask a question" maxlength="2000" dir="auto"></textarea></div>
-      <div class="composer-foot"><span class="hint">Type @ to mention a classmate · Ctrl + Enter sends</span><button class="btn btn-primary btn-sm" type="submit">${icon('comment', 'i-sm')}Comment</button></div>
+      <div class="up-list attach-list" id="attach-comment">${postUi.attach.comment.map(u => uploadRow(u, 'comment'))}</div>
+      <div class="composer-foot"><span class="hint">Type @ to mention a classmate · Ctrl + Enter sends</span>
+        <div class="composer-btns">${attachButton('comment')}<button class="btn btn-primary btn-sm" type="submit">${icon('comment', 'i-sm')}Comment</button></div></div>
     </div>
   </form>`;
 }
@@ -1252,14 +1299,14 @@ function applyType(type) {
   if (!whereOpt) $('#l-location').insertAdjacentHTML('beforeend', ' <span class="opt">(optional)</span>');
 }
 
-function uploadRow(u) {
+function uploadRow(u, kind = '') {
   const pct = Math.round((u.progress || 0) * 100);
   return html`
   <div class="up-item ${u.status === 'error' ? 'is-error' : ''}" data-key="${u.key}">
     <span class="file-icon">${extOf(u.name)}</span>
     <div class="file-main"><div class="file-name">${u.name}</div>
       <div class="file-meta">${u.status === 'uploading' ? `Uploading… ${pct}%` : u.status === 'error' ? u.error : sizeText(u.size)}</div></div>
-    <button class="icon-btn" type="button" data-action="remove-upload" data-key="${u.key}" aria-label="Remove ${u.name}">${icon('x')}</button>
+    <button class="icon-btn" type="button" data-action="${kind ? 'attach-remove' : 'remove-upload'}" data-kind="${kind}" data-key="${u.key}" aria-label="Remove ${u.name}">${icon('x')}</button>
     ${u.status === 'uploading' ? html`<span class="progress" style="--p:${pct}%"></span>` : ''}
   </div>`;
 }
@@ -2212,12 +2259,21 @@ const actions = {
   'toggle-notifs'() { if (notifs.open) closeNotifs(); else openNotifs(); },
   'notif-open'() { closeNotifs(); },
   reply(el) {
+    if (!postUi.reply || postUi.reply.thread !== el.dataset.thread) clearAttach('reply');
     postUi.reply = { thread: el.dataset.thread, parent: el.dataset.parent, prefill: el.dataset.name ? `@${el.dataset.name} ` : '' };
     postUi.editing = null;
     paint(state.view, true);
     focusEnd($(`#reply-body-${el.dataset.thread}`));
   },
-  'cancel-reply'() { postUi.reply = null; paint(state.view, true); },
+  'cancel-reply'() { postUi.reply = null; clearAttach('reply'); paint(state.view, true); },
+  'attach-remove'(el) {
+    const kind = el.dataset.kind;
+    const u = postUi.attach[kind].find(x => x.key === el.dataset.key);
+    if (!u) return;
+    postUi.attach[kind] = postUi.attach[kind].filter(x => x !== u);
+    if (u.xhr) u.xhr.abort();
+    renderAttach(kind);
+  },
   'edit-comment'(el) {
     postUi.editing = el.dataset.id;
     postUi.reply = null;
@@ -2352,11 +2408,14 @@ const forms = {
   async reply(f) {
     const ta = $('textarea', f);
     const body = ta.value.trim();
-    if (!body) { ta.focus(); return; }
+    const fileIds = readyAttach('reply');
+    if (!fileIds) return;
+    if (!body && !fileIds.length) { ta.focus(); return; }
     busy(f, true);
     try {
-      await api('POST', `/api/posts/${f.dataset.post}/comments`, { body, parentId: f.dataset.parent });
+      await api('POST', `/api/posts/${f.dataset.post}/comments`, { body, parentId: f.dataset.parent, fileIds });
       postUi.reply = null;
+      postUi.attach.reply = [];
       paint(state.view, true);
       await refreshCurrent();
     } catch (err) { toastError(err); busy(f, false); }
@@ -2364,7 +2423,8 @@ const forms = {
   async 'edit-comment'(f) {
     const ta = $('textarea', f);
     const body = ta.value.trim();
-    if (!body) { ta.focus(); return; }
+    const c = state.view.data.comments && state.view.data.comments.find(x => x.id === f.dataset.id);
+    if (!body && !(c && c.files && c.files.length)) { ta.focus(); return; }
     busy(f, true);
     try {
       await api('PATCH', `/api/comments/${f.dataset.id}`, { body });
@@ -2376,11 +2436,15 @@ const forms = {
   async comment(f) {
     const ta = $('#comment-body');
     const body = ta.value.trim();
-    if (!body) { ta.focus(); return; }
+    const fileIds = readyAttach('comment');
+    if (!fileIds) return;
+    if (!body && !fileIds.length) { ta.focus(); return; }
     busy(f, true);
     try {
-      await api('POST', `/api/posts/${f.dataset.id}/comments`, { body });
+      await api('POST', `/api/posts/${f.dataset.id}/comments`, { body, fileIds });
       ta.value = '';
+      postUi.attach.comment = [];
+      renderAttach('comment');
       ta.blur();
       await refreshCurrent();
       const last = $$('.comment').pop();
@@ -2519,6 +2583,10 @@ document.addEventListener('submit', e => {
 });
 document.addEventListener('change', e => {
   if (e.target.id === 'show-done') { store.set('showDone', e.target.checked); paint(state.view, true); }
+  if (e.target.dataset.attach && postUi.attach[e.target.dataset.attach]) {
+    addAttachFiles(e.target.dataset.attach, e.target.files);
+    e.target.value = '';
+  }
 });
 document.addEventListener('keydown', e => {
   if (e.key !== '/' || e.ctrlKey || e.metaKey || e.altKey) return;

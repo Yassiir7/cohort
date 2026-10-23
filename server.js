@@ -356,22 +356,44 @@ function postDetail(id, meId) {
   if (post.dueChange) post.dueChange.byName = (studentById(post.dueChange.by) || {}).name || 'Someone';
   const files = db.all(`SELECT f.*, s.name AS uploader_name FROM files f JOIN students s ON s.id = f.uploaded_by
                         WHERE f.post_id = $id AND f.removed_at IS NULL ORDER BY f.created_at`, { id }).map(fileShape);
-  const comments = db.all(`SELECT m.*, s.name, s.color FROM comments m JOIN students s ON s.id = m.student_id
+  let comments = db.all(`SELECT m.*, s.name, s.color FROM comments m JOIN students s ON s.id = m.student_id
                            WHERE m.post_id = $id AND (m.deleted_at IS NULL
                              OR EXISTS (SELECT 1 FROM comments r WHERE r.parent_id = m.id AND r.deleted_at IS NULL))
-                           ORDER BY m.created_at`, { id })
-    .map(m => commentShape(m, meId));
+                           ORDER BY m.created_at`, { id });
+  const byComment = new Map();
+  for (const f of db.all(`SELECT f.* FROM files f JOIN comments m ON m.id = f.comment_id
+                          WHERE m.post_id = $id AND f.removed_at IS NULL ORDER BY f.created_at`, { id })) {
+    if (!byComment.has(f.comment_id)) byComment.set(f.comment_id, []);
+    byComment.get(f.comment_id).push(fileShape(f));
+  }
+  comments = comments.map(m => commentShape(m, meId, byComment.get(m.id)));
   return { post, files, comments, deleteVotes: deleteVotesFor(id, meId), threshold: config.deleteVotes };
 }
 
-function commentShape(m, meId) {
+function commentShape(m, meId, files) {
   if (m.deleted_at) return { id: m.id, parentId: m.parent_id, createdAt: m.created_at, deleted: true };
+  if (!files) files = db.all('SELECT * FROM files WHERE comment_id = $id AND removed_at IS NULL ORDER BY created_at', { id: m.id }).map(fileShape);
   return {
     id: m.id, parentId: m.parent_id, body: m.body, createdAt: m.created_at, editedAt: m.edited_at,
     author: { id: m.student_id, name: m.name, color: m.color }, mine: m.student_id === meId,
-    mentions: JSON.parse(m.mentions || '[]'),
+    mentions: JSON.parse(m.mentions || '[]'), files,
   };
 }
+
+// Files a student just uploaded for a comment or reply; each can be attached once.
+function resolveCommentFiles(fileIds, meId) {
+  if (fileIds === undefined) return [];
+  if (!Array.isArray(fileIds)) fail(400, 'Attachments are not valid.');
+  const ids = [...new Set(fileIds.map(String))];
+  if (ids.length > 6) fail(400, 'A comment can have at most 6 files.');
+  return ids.map(id => {
+    const f = db.one('SELECT * FROM files WHERE id = $id', { id });
+    if (!f) fail(400, 'One of the files is missing. Upload it again.');
+    if (f.uploaded_by !== meId || f.post_id !== null || f.comment_id !== null) fail(400, 'One of the files is already attached somewhere else.');
+    return f;
+  });
+}
+const commentExcerpt = (content, files) => (content || `Shared ${files.length === 1 ? files[0].name : `${files.length} files`}`).slice(0, 140);
 
 // "@Name" is a mention when it matches a classmate's full name on word boundaries.
 // Longer names are tried first, so "@Sara K." is never also read as "@Sara".
@@ -478,7 +500,7 @@ function resolveFiles(fileIds, meId, postId) {
   return ids.map(id => {
     const f = db.one('SELECT * FROM files WHERE id = $id', { id });
     if (!f) fail(400, 'One of the files is missing. Upload it again.');
-    const mineUnattached = f.post_id === null && f.uploaded_by === meId;
+    const mineUnattached = f.post_id === null && f.comment_id === null && f.uploaded_by === meId;
     if (!mineUnattached && !(postId && f.post_id === postId)) fail(400, 'One of the files belongs to another post.');
     return f;
   });
@@ -842,7 +864,8 @@ route('PUT', '/api/posts/:id/done', ({ me, params, body }) => {
 // Replies stay one level deep: answering a reply joins the same thread, and its author is still notified.
 route('POST', '/api/posts/:id/comments', ({ me, params, body }) => {
   const post = livePost(params.id);
-  const content = text(body.body, 'Comment', { min: 1, max: 2000, multiline: true });
+  const files = resolveCommentFiles(body.fileIds, me.id);
+  const content = text(body.body, 'Comment', { min: files.length ? 0 : 1, max: 2000, multiline: true });
   let parent = null;
   if (body.parentId) {
     parent = db.one('SELECT * FROM comments WHERE id = $id AND post_id = $post', { id: String(body.parentId), post: post.id });
@@ -856,8 +879,10 @@ route('POST', '/api/posts/:id/comments', ({ me, params, body }) => {
     db.run(`INSERT INTO comments (id, post_id, student_id, parent_id, body, mentions, created_at)
             VALUES ($id, $post, $me, $parent, $body, $mentions, $t)`,
     { id, post: post.id, me: me.id, parent: parent ? parent.parent_id || parent.id : null, body: content, mentions: JSON.stringify(mentions), t });
-    logActivity({ kind: 'comment_added', courseId: post.course_id, postId: post.id, studentId: me.id, data: { commentId: id, title: post.title, excerpt: content.slice(0, 140) } });
-    const base = { actorId: me.id, courseId: post.course_id, postId: post.id, commentId: id, data: { title: post.title, type: post.type, excerpt: content.slice(0, 140) } };
+    for (const f of files) db.run('UPDATE files SET comment_id = $c WHERE id = $id', { c: id, id: f.id });
+    const excerpt = commentExcerpt(content, files);
+    logActivity({ kind: 'comment_added', courseId: post.course_id, postId: post.id, studentId: me.id, data: { commentId: id, title: post.title, excerpt } });
+    const base = { actorId: me.id, courseId: post.course_id, postId: post.id, commentId: id, data: { title: post.title, type: post.type, excerpt } };
     const told = new Set([me.id]);
     const tell = (kind, ids) => {
       const fresh = ids.filter(x => !told.has(x));
@@ -878,11 +903,12 @@ route('PATCH', '/api/comments/:id', ({ me, params, body }) => {
   if (!c) fail(404, 'This comment does not exist.');
   if (c.student_id !== me.id) fail(403, 'You can only edit your own comments.');
   if (c.post_deleted) fail(410, 'This post was deleted.');
-  const content = text(body.body, 'Comment', { min: 1, max: 2000, multiline: true });
+  const files = db.all('SELECT name FROM files WHERE comment_id = $id AND removed_at IS NULL', { id: c.id });
+  const content = text(body.body, 'Comment', { min: files.length ? 0 : 1, max: 2000, multiline: true });
   if (content !== c.body) {
     const mentions = findMentions(content);
     const before = new Set(JSON.parse(c.mentions || '[]').map(m => m.id));
-    const excerpt = content.slice(0, 140);
+    const excerpt = commentExcerpt(content, files);
     db.tx(() => {
       db.run('UPDATE comments SET body = $body, mentions = $mentions, edited_at = $t WHERE id = $id',
         { body: content, mentions: JSON.stringify(mentions), t: nowIso(), id: c.id });
@@ -1038,9 +1064,9 @@ route('POST', '/api/uploads', async ({ req, me }) => {
   return fileShape({ id, name, mime, size, created_at: t });
 }, { raw: true });
 
-// Uploads that never got attached to a post are removed after a day.
+// Uploads that never got attached to a post or comment are removed after a day.
 async function cleanupOrphans() {
-  const rows = db.all('SELECT id FROM files WHERE post_id IS NULL AND created_at < $cutoff', { cutoff: isoAt(Date.now() - DAY) });
+  const rows = db.all('SELECT id FROM files WHERE post_id IS NULL AND comment_id IS NULL AND created_at < $cutoff', { cutoff: isoAt(Date.now() - DAY) });
   for (const r of rows) {
     await fsp.rm(path.join(UPLOAD_DIR, r.id), { force: true });
     db.run('DELETE FROM files WHERE id = $id', { id: r.id });

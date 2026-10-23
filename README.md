@@ -2,10 +2,10 @@
 
 A shared board for a class: exams, homework, announcements and course files in one place, kept up to date by the students themselves.
 
-- **Up next**: every deadline from the courses you track, sorted by what's due first, with a live countdown to the next one, plus the latest announcements.
+- **Up next**: every deadline from the courses you track, on a timeline with one stop per day, sorted by what's due first, with a live countdown to the next one, plus the latest announcements.
 - **Courses**: anyone can add a course; each student tracks the ones they take.
 - **Posts**: Exam, Homework, Announcement or Material, with date, time, room or submission place, grade weight, details and file uploads (up to 25 MB each).
-- **Votes and comments** on every post. Three or more net upvotes mark a post *Confirmed*; two net downvotes mark it *Disputed*. Students can reply to a comment, edit their own comments (marked *edited*), and type `@` to mention a classmate.
+- **Votes and comments** on every post. Three or more net upvotes mark a post *Confirmed*; two net downvotes mark it *Disputed*. Students can reply to a comment, attach files to comments and replies (up to 6, shown as picture previews or file links), edit their own comments (marked *edited*), and type `@` to mention a classmate.
 - **Notifications**: a bell shows new posts in your courses, date changes, replies to your comments, comments on your posts and @mentions of you. Opening it marks them read.
 - **Edits keep history**: every edit makes a new version, the post shows it was edited, and the history page shows each version with the changes highlighted. A changed date gets a warning banner for two weeks.
 - **Deleting needs agreement**: a student asks to delete with a reason, and the post is deleted only when 5 students agree.

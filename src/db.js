@@ -177,6 +177,8 @@ function openDb(file) {
   addColumn('comments', 'mentions', "TEXT NOT NULL DEFAULT '[]'");
   addColumn('comments', 'edited_at', 'TEXT');
   db.exec('CREATE INDEX IF NOT EXISTS comments_parent ON comments(parent_id)');
+  addColumn('files', 'comment_id', 'TEXT');
+  db.exec('CREATE INDEX IF NOT EXISTS files_comment ON files(comment_id)');
   addColumn('students', 'username_key', 'TEXT');
   addColumn('students', 'password_hash', 'TEXT');
   const taken = new Set(db.prepare('SELECT username_key FROM students WHERE username_key IS NOT NULL').all().map(r => r.username_key));
