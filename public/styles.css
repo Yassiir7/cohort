@@ -1483,3 +1483,16 @@ button.crumb { border: 0; background: none; padding: 0; font-weight: 500; color:
   .agenda::before { left: 5px; }
   .agenda .group-head::before { left: -24px; width: 12px; height: 12px; }
 }
+
+/* guests: read everything, take part after signing up */
+.welcome-skip { margin: 0; }
+.welcome-skip .btn { background: var(--surface); }
+.welcome-skip .btn .i { margin-left: 4px; }
+.guest-bar { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 4px 12px; padding: 9px 16px; background: var(--accent-soft, var(--sunken)); color: var(--ink); font-size: 13.5px; text-align: center; border-bottom: 1px solid var(--line); }
+.guest-bar .linkish { font-weight: 600; }
+.guest-cta { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 12px; margin-top: 20px; padding: 14px 16px; border: 1px dashed var(--line-2); border-radius: var(--r-3); background: var(--surface); color: var(--ink-2); font-size: 14px; }
+.guest-cta > span { flex: 1; min-width: 180px; }
+.guest-cta > .i { color: var(--accent); }
+@media (max-width: 520px) {
+  .guest-signin { display: none; }
+}

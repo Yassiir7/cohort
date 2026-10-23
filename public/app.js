@@ -123,6 +123,7 @@ function greeting() {
   const h = new Date().getHours();
   return h < 5 ? 'Good evening' : h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening';
 }
+const hello = () => (state.me ? `${greeting()}, ${firstName(state.me.name)}` : greeting());
 function firstDayOfWeek() {
   try {
     const loc = new Intl.Locale(navigator.language);
@@ -477,7 +478,7 @@ function homeHtml(data) {
   const me = state.me;
   if (!data.trackedCourses) {
     return html`
-    <div class="page-head"><div><div class="eyebrow">${greeting()}, ${firstName(me.name)}</div><h1 class="page-title">Pick the courses you take</h1>
+    <div class="page-head"><div><div class="eyebrow">${hello()}</div><h1 class="page-title">${me ? 'Pick the courses you take' : 'Nothing here yet'}</h1>
       <p class="page-sub">Up next fills with the exams, homework and announcements of the courses you track, sorted by what's due first.</p></div></div>
     ${data.totalCourses
       ? emptyState(`${plural(data.totalCourses, 'course')} already added by classmates`, 'Track yours and their deadlines show up here.', html`<a class="btn btn-primary" href="#/courses">${icon('courses')}Browse courses</a>`)
@@ -508,7 +509,7 @@ function homeHtml(data) {
     <div class="home-main">
       <div class="home-head">
         <div>
-          <div class="eyebrow">${greeting()}, ${firstName(me.name)}</div>
+          <div class="eyebrow">${hello()}</div>
           <h1 class="page-title">${sum.total ? `${plural(sum.total, 'deadline')} in the next 7 days` : 'Nothing due in the next 7 days'}</h1>
           ${subParts.length ? html`<p class="page-sub">${subParts.join(' · ')}</p>` : ''}
         </div>
@@ -927,7 +928,8 @@ function commentsHtml(d) {
       </div>`;
     })}</div>`
     : html`<p class="note comment-empty">No comments yet. Ask a question or add what you heard in class.</p>`}
-  <form class="composer" data-form="comment" data-id="${p.id}">
+  ${!state.me ? html`<div class="guest-cta">${icon('comment')}<span>Sign up to comment, reply and attach files.</span>
+    <button class="btn btn-primary btn-sm" type="button" data-action="join">Sign up</button></div>` : html`<form class="composer" data-form="comment" data-id="${p.id}">
     ${avatar(state.me)}
     <div>
       <div class="mention-wrap"><label class="sr-only" for="comment-body">Write a comment</label>
@@ -936,7 +938,7 @@ function commentsHtml(d) {
       <div class="composer-foot"><span class="hint">Type @ to mention a classmate · Ctrl + Enter sends</span>
         <div class="composer-btns">${attachButton('comment')}<button class="btn btn-primary btn-sm" type="submit">${icon('comment', 'i-sm')}Comment</button></div></div>
     </div>
-  </form>`;
+  </form>`}`;
 }
 function postHtml(d) {
   const p = d.post;
@@ -1436,7 +1438,7 @@ async function viewCalendar(route) {
   const monthDays = new Date(first.getFullYear(), first.getMonth() + 1, 0).getDate();
   const weeks = Math.ceil((offset + monthDays) / 7);
   const gridEnd = addDays(gridStart, weeks * 7);
-  const scope = store.get('calScope', 'mine');
+  const scope = state.me ? store.get('calScope', 'mine') : 'all';
   const data = await get(`/api/agenda?from=${enc(gridStart.toISOString())}&to=${enc(gridEnd.toISOString())}${scope === 'all' ? '&scope=all' : ''}`);
   const monthKey = ymd(first).slice(0, 7);
   const selected = route.query.get('d') || (ymd(today).startsWith(monthKey) ? ymd(today) : ymd(first));
@@ -1477,15 +1479,15 @@ function calendarHtml(data, ctx) {
     </button>`;
   });
   const dows = Array.from({ length: 7 }, (_, i) => F.dow.format(addDays(gridStart, i)));
-  const feed = `${location.origin}/cal/${state.me.feedToken}.ics`;
+  const feed = state.me ? `${location.origin}/cal/${state.me.feedToken}.ics` : '';
   const webcal = feed.replace(/^https?:/, 'webcal:');
   return html`
   <div class="page-head">
     <div><div class="eyebrow">Calendar</div><h1 class="page-title">Deadlines by month</h1></div>
-    <div class="chips" role="group" aria-label="Courses shown">
+    ${state.me ? html`<div class="chips" role="group" aria-label="Courses shown">
       <button class="chip" type="button" data-action="cal-scope" data-value="mine" aria-pressed="${bool(scope === 'mine')}">My courses</button>
       <button class="chip" type="button" data-action="cal-scope" data-value="all" aria-pressed="${bool(scope === 'all')}">All courses</button>
-    </div>
+    </div>` : ''}
   </div>
   <div class="cal-layout">
     <div>
@@ -1504,7 +1506,7 @@ function calendarHtml(data, ctx) {
     </div>
     <aside>
       <section class="panel panel-pad day-panel" id="day-panel">${dayPanelHtml(data.posts, selected)}</section>
-      <section class="panel panel-pad sub-panel">
+      ${feed ? html`<section class="panel panel-pad sub-panel">
         <h2 class="section-title">Get it in your phone's calendar</h2>
         <p class="note">Subscribe once. Every exam and homework from the courses you track appears in your calendar app, with a reminder the day before, and changes sync on their own.</p>
         <div class="feed-url mt-12"><label class="sr-only" for="feed-url">Your calendar link</label><input class="input" id="feed-url" readonly value="${feed}">
@@ -1515,14 +1517,14 @@ function calendarHtml(data, ctx) {
           <div><b>Outlook:</b> Add calendar → Subscribe from web, then paste the link.</div>
         </div>
         <p class="hint mt-12">The link is personal: it follows the courses you track. Calendar apps check it every few hours, so ${appName()} itself always has the latest.</p>
-      </section>
+      </section>` : ''}
     </aside>
   </div>`;
 }
 
 // ------------------------------------------------------------------ activity
 async function viewActivity() {
-  const scope = store.get('actScope', 'mine');
+  const scope = state.me ? store.get('actScope', 'mine') : 'all';
   const r = await get(`/api/activity?scope=${scope}`);
   return { title: 'Activity', data: { items: r.items, end: r.items.length < 50 }, html: d => activityHtml(d, scope) };
 }
@@ -1541,8 +1543,8 @@ function activityHtml(data, scope) {
     <div><div class="eyebrow">Activity</div><h1 class="page-title">What changed</h1>
       <p class="page-sub">Every post, edit, comment and deletion vote, newest first. Date changes are marked so you never miss a moved deadline.</p></div>
     <div class="chips" role="group" aria-label="Courses shown">
-      <button class="chip" type="button" data-action="act-scope" data-value="mine" aria-pressed="${bool(scope === 'mine')}">My courses</button>
-      <button class="chip" type="button" data-action="act-scope" data-value="all" aria-pressed="${bool(scope === 'all')}">All courses</button>
+      ${state.me ? html`<button class="chip" type="button" data-action="act-scope" data-value="mine" aria-pressed="${bool(scope === 'mine')}">My courses</button>
+      <button class="chip" type="button" data-action="act-scope" data-value="all" aria-pressed="${bool(scope === 'all')}">All courses</button>` : ''}
     </div>
   </div>
   <div class="feed">
@@ -1890,6 +1892,7 @@ function focusAuth() {
 }
 function showWelcome({ mode, notice = '' } = {}) {
   state.me = null;
+  state.guest = false;
   document.title = appName();
   const start = mode || (new URLSearchParams(location.search).get('code') ? 'register' : store.get('lastUser') ? 'signin' : 'register');
   $('#app').innerHTML = html`
@@ -1898,14 +1901,30 @@ function showWelcome({ mode, notice = '' } = {}) {
       <span class="brand">${brandMark()}<span>${appName()}</span></span>
       <h1>Every exam and deadline, <em>in one place</em>.</h1>
       <p class="lede">Our class keeps this list together. Anyone can add an exam, homework or announcement, fix a wrong date, and vote on what's right.</p>
+      <p class="welcome-skip"><button class="btn" type="button" data-action="browse">Skip for now and look around${icon('arrow', 'i-sm')}</button></p>
       ${sampleSheet()}
     </section>
     <section class="welcome-form"><div class="welcome-card" id="welcome-card">${authCard(start, notice)}</div></section>
   </div>`.s;
   focusAuth();
 }
+// Guests can read everything but change nothing; any attempt asks them to sign up.
+function browseAsGuest() {
+  state.me = null;
+  state.guest = true;
+  store.set('browse', true);
+  startApp();
+}
+function joinPrompt() {
+  openDialog('Join your class to take part', html`
+    <p>You're looking around as a guest. Create a free account (a username and a password, no email) to post, vote, comment, mark things done and track your courses.</p>
+    <div class="form-actions"><button class="btn btn-primary" type="button" data-action="join">Create account</button>
+      <button class="btn" type="button" data-action="guest-signin">I have an account</button></div>`);
+}
 function signedIn(me) {
   state.me = me;
+  state.guest = false;
+  store.del('browse');
   store.set('lastUser', me.name);
   clearLegacyKey();
   startApp();
@@ -2040,15 +2059,19 @@ function renderShell() {
       <div class="topbar-actions">
         <span class="live" id="live" title="Connecting…">Live</span>
         <a class="icon-btn mobile-only" href="#/search" aria-label="Search">${icon('search')}</a>
-        <div class="notif" id="notif">
+        ${state.me ? html`<div class="notif" id="notif">
           <button class="icon-btn notif-btn" id="notif-btn" type="button" data-action="toggle-notifs" aria-expanded="false" aria-controls="notif-panel" aria-label="Notifications">${icon('bell')}<span class="notif-count" id="notif-count" hidden></span></button>
           <div class="notif-panel" id="notif-panel" role="region" aria-label="Notifications" hidden></div>
-        </div>
-        <a class="btn btn-primary new-post" href="#/new">${icon('plus')}New post</a>
-        <button class="avatar-btn" id="me-btn" type="button" data-action="profile" aria-label="Your profile">${avatar(state.me, 'avatar-lg')}</button>
+        </div>` : ''}
+        ${state.me ? html`<a class="btn btn-primary new-post" href="#/new">${icon('plus')}New post</a>
+        <button class="avatar-btn" id="me-btn" type="button" data-action="profile" aria-label="Your profile">${avatar(state.me, 'avatar-lg')}</button>`
+        : html`<button class="btn btn-ghost guest-signin" type="button" data-action="guest-signin">Sign in</button>
+        <button class="btn btn-primary" type="button" data-action="join">Sign up</button>`}
       </div>
     </div>
   </header>
+  ${state.me ? '' : html`<div class="guest-bar" role="note"><span>You're looking around as a guest. Sign up to post, vote, comment and track your courses.</span>
+    <button class="linkish" type="button" data-action="join">Create an account</button></div>`}
   <main class="main" id="main" tabindex="-1"></main>
   <nav class="bottombar" aria-label="Main">
     ${NAV.slice(0, 2).map(n => html`<a href="${n.href}" data-nav="${n.key}">${icon(n.icon)}<span>${n.label}</span></a>`)}
@@ -2110,7 +2133,7 @@ function setViewData(data) {
 
 let routeSeq = 0;
 async function route({ soft = false } = {}) {
-  if (!state.me) return;
+  if (!state.me && !state.guest) return;
   const { path, query } = parseHash();
   let match = null;
   for (const r of ROUTES) {
@@ -2118,6 +2141,11 @@ async function route({ soft = false } = {}) {
     if (m) { match = { ...r, params: m.slice(1), query }; break; }
   }
   if (!match) { location.replace('#/'); return; }
+  if (!state.me && (match.name === 'new' || match.name === 'edit')) {
+    if (state.route) history.back(); else location.replace('#/');
+    joinPrompt();
+    return;
+  }
   const samePage = state.route && state.route.name === match.name && state.route.params.join() === match.params.join();
   if (!soft) closeNotifs();
   state.route = match;
@@ -2167,8 +2195,8 @@ function softRefresh() {
 function onLive(evt) {
   if (evt.t !== 'vote') scheduleNotifRefresh();
   const r = state.route;
-  if (!r || !state.me) return;
-  const mine = !evt.courseId || state.me.tracked.includes(evt.courseId);
+  if (!r || (!state.me && !state.guest)) return;
+  const mine = !state.me || !evt.courseId || state.me.tracked.includes(evt.courseId);
   const relevant = {
     home: mine || evt.t === 'course', calendar: true, activity: true, courses: true,
     course: evt.courseId === r.params[0], post: evt.postId === r.params[0], history: evt.postId === r.params[0],
@@ -2267,6 +2295,9 @@ const actions = {
     paint(state.view, true);
     focusEnd($(`#reply-body-${el.dataset.thread}`));
   },
+  browse() { browseAsGuest(); },
+  join() { closeDialog(); showWelcome({ mode: 'register' }); },
+  'guest-signin'() { closeDialog(); showWelcome({ mode: 'signin' }); },
   'cancel-reply'() { postUi.reply = null; clearAttach('reply'); paint(state.view, true); },
   'attach-remove'(el) {
     const kind = el.dataset.kind;
@@ -2573,9 +2604,13 @@ function startApp() {
   route();
 }
 
+// What a guest may do: move around and read. Everything else asks them to sign up.
+const GUEST_ACTIONS = new Set(['home-filter', 'show-done', 'close-dialog', 'close-dialog-nav', 'cal-day', 'load-more', 'copy', 'share', 'ics',
+  'theme', 'back', 'retry', 'join', 'guest-signin', 'browse', 'auth-mode', 'toggle-pw']);
 document.addEventListener('click', e => {
   const el = e.target.closest('[data-action]');
   if (!el) return;
+  if (state.guest && !GUEST_ACTIONS.has(el.dataset.action)) { e.preventDefault(); joinPrompt(); return; }
   const fn = actions[el.dataset.action];
   if (!fn) return;
   if (!FOLLOW_LINK.has(el.dataset.action)) e.preventDefault();
@@ -2586,6 +2621,7 @@ document.addEventListener('submit', e => {
   const fn = forms[f.dataset.form];
   if (!fn) return;
   e.preventDefault();
+  if (state.guest && f.dataset.form !== 'search-top') { joinPrompt(); return; }
   fn(f, e);
 });
 document.addEventListener('change', e => {
@@ -2601,7 +2637,7 @@ document.addEventListener('keydown', e => {
   if (a && (/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName) || a.isContentEditable)) return;
   const input = $('#top-q');
   if (input && input.offsetParent) { e.preventDefault(); input.focus(); }
-  else if (state.me) { e.preventDefault(); location.hash = '#/search'; }
+  else if (state.me || state.guest) { e.preventDefault(); location.hash = '#/search'; }
 });
 dlg().addEventListener('click', e => { if (e.target === dlg()) closeDialog(); });
 matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => applyTheme(store.get('theme', 'system')));
@@ -2639,6 +2675,8 @@ async function boot() {
       clearLegacyKey();
     }
   }
+  // Someone who chose to look around before keeps doing so, unless they came from an invite link.
+  if (store.get('browse', false) && !new URLSearchParams(location.search).get('code')) { browseAsGuest(); return; }
   showWelcome();
 }
 boot();

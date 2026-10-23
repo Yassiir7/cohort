@@ -13,6 +13,7 @@ A shared board for a class: exams, homework, announcements and course files in o
 - **Done**: an exam or homework is done for the whole class once its due time passes. To mark it done earlier, students vote inside the post; when 6 agree (the first plus 5 others) it is done for everyone and leaves Up next.
 - **Live**: changes from classmates appear without reloading.
 - **Accounts**: a username (the name classmates see) and a password, no email. *Keep me signed in* keeps a student signed in until they sign out. The device key shown at sign-up gets them back in if they forget the password, and they then choose a new one.
+- **Look around first**: visitors can skip sign-up and read everything: the timeline for all courses, posts, comments, the calendar, activity and search. Voting, posting, commenting, marking done and tracking ask them to create an account first. The class code is still needed to sign up.
 - **Add to home screen**: on phones the profile menu offers it. Android shows the install prompt; iPhone shows the Safari steps.
 
 ## Run it

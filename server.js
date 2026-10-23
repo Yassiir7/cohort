@@ -532,11 +532,13 @@ const dueOf = p => ({ dueAt: p.due_at, hasTime: !!p.has_time, dueDate: p.due_dat
 
 // ---------------------------------------------------------------- routes
 const routes = [];
-function route(method, pattern, handler, { auth = true, raw = false } = {}) {
+// guest: visitors without an account may read this route; everything that changes data still needs one.
+function route(method, pattern, handler, { auth = true, raw = false, guest = false } = {}) {
   const keys = [];
   const re = new RegExp('^' + pattern.replace(/:(\w+)/g, (_, k) => { keys.push(k); return '([A-Za-z0-9_-]+)'; }) + '$');
-  routes.push({ method, re, keys, handler, auth, raw });
+  routes.push({ method, re, keys, handler, auth: auth && !guest, raw });
 }
+const GUEST_ID = '';
 
 route('GET', '/api/config', () => ({
   appName: config.appName, joinCodeRequired: !!config.joinCode, deleteVotes: config.deleteVotes,
@@ -659,8 +661,9 @@ route('PATCH', '/api/me', ({ me, body, session }) => {
 
 route('GET', '/api/home', ({ me }) => {
   const now = Date.now();
-  const params = { me: me.id, since: isoAt(now - 14 * DAY), recent: isoAt(now - 30 * DAY) };
-  const tracked = 'p.course_id IN (SELECT course_id FROM tracks WHERE student_id = $me) AND c.archived = 0';
+  const params = { me: me ? me.id : GUEST_ID, since: isoAt(now - 14 * DAY), recent: isoAt(now - 30 * DAY) };
+  // Guests see every course; students see the ones they track.
+  const tracked = me ? 'p.course_id IN (SELECT course_id FROM tracks WHERE student_id = $me) AND c.archived = 0' : 'c.archived = 0';
   const upcoming = db.all(`SELECT ${POST_FIELDS} ${POST_FROM}
       WHERE p.deleted_at IS NULL AND ${tracked}
         AND ((p.due_at IS NOT NULL AND p.due_at >= $since) OR (p.due_at IS NULL AND p.type IN ('exam', 'homework')))
@@ -668,27 +671,27 @@ route('GET', '/api/home', ({ me }) => {
   const announcements = db.all(`SELECT ${POST_FIELDS} ${POST_FROM}
       WHERE p.deleted_at IS NULL AND ${tracked} AND p.type = 'announcement' AND p.created_at >= $recent
       ORDER BY p.created_at DESC LIMIT 8`, params).map(postSummary);
-  const trackedCourses = db.one(`SELECT COUNT(*) AS n FROM tracks t JOIN courses c ON c.id = t.course_id
-      WHERE t.student_id = $me AND c.archived = 0`, { me: me.id }).n;
   const totalCourses = db.one('SELECT COUNT(*) AS n FROM courses WHERE archived = 0').n;
+  const trackedCourses = me ? db.one(`SELECT COUNT(*) AS n FROM tracks t JOIN courses c ON c.id = t.course_id
+      WHERE t.student_id = $me AND c.archived = 0`, { me: me.id }).n : totalCourses;
   return { upcoming, announcements, trackedCourses, totalCourses, now: isoAt(now) };
-});
+}, { guest: true });
 
 route('GET', '/api/agenda', ({ me, query }) => {
   const from = new Date(query.get('from') || ''), to = new Date(query.get('to') || '');
   if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime()) || to <= from || to - from > 70 * DAY) fail(400, 'Pick a range of up to ten weeks.');
-  const mine = query.get('scope') !== 'all';
+  const mine = me && query.get('scope') !== 'all';
   const posts = db.all(`SELECT ${POST_FIELDS} ${POST_FROM}
       WHERE p.deleted_at IS NULL AND c.archived = 0 AND p.due_at >= $from AND p.due_at < $to
       ${mine ? 'AND p.course_id IN (SELECT course_id FROM tracks WHERE student_id = $me)' : ''}
-      ORDER BY p.due_at LIMIT 600`, { me: me.id, from: from.toISOString(), to: to.toISOString() }).map(postSummary);
+      ORDER BY p.due_at LIMIT 600`, { me: me ? me.id : GUEST_ID, from: from.toISOString(), to: to.toISOString() }).map(postSummary);
   return { posts };
-});
+}, { guest: true });
 
 route('GET', '/api/activity', ({ me, query }) => {
   const before = parseInt(query.get('before'), 10) || null;
-  return { items: activityList({ meId: me.id, scope: query.get('scope') === 'all' ? 'all' : 'mine', before, limit: 50 }) };
-});
+  return { items: activityList({ meId: me ? me.id : GUEST_ID, scope: me && query.get('scope') !== 'all' ? 'mine' : 'all', before, limit: 50 }) };
+}, { guest: true });
 
 route('GET', '/api/search', ({ me, query }) => {
   const q = (query.get('q') || '').trim().slice(0, 80);
@@ -698,21 +701,21 @@ route('GET', '/api/search', ({ me, query }) => {
       WHERE p.deleted_at IS NULL AND c.archived = 0
         AND (p.title LIKE $like ESCAPE '\\' OR p.body LIKE $like ESCAPE '\\' OR p.location LIKE $like ESCAPE '\\')
       ORDER BY (p.course_id IN (SELECT course_id FROM tracks WHERE student_id = $me)) DESC, p.updated_at DESC
-      LIMIT 40`, { me: me.id, like }).map(postSummary);
+      LIMIT 40`, { me: me ? me.id : GUEST_ID, like }).map(postSummary);
   const nowS = nowIso();
   const courses = db.all(`${COURSE_SQL} WHERE c.archived = 0
         AND (c.code LIKE $like ESCAPE '\\' OR c.name LIKE $like ESCAPE '\\' OR c.instructor LIKE $like ESCAPE '\\')
-      ORDER BY c.code COLLATE NOCASE LIMIT 10`, { me: me.id, now: nowS, like }).map(c => courseShape(c));
+      ORDER BY c.code COLLATE NOCASE LIMIT 10`, { me: me ? me.id : GUEST_ID, now: nowS, like }).map(c => courseShape(c));
   return { posts, courses };
-});
+}, { guest: true });
 
 // ---- courses
 route('GET', '/api/courses', ({ me }) => {
   const now = nowIso();
   const next = nextDueByCourse(now);
-  return db.all(`${COURSE_SQL} WHERE c.archived = 0 ORDER BY c.code COLLATE NOCASE`, { me: me.id, now })
+  return db.all(`${COURSE_SQL} WHERE c.archived = 0 ORDER BY c.code COLLATE NOCASE`, { me: me ? me.id : GUEST_ID, now })
     .map(c => courseShape(c, next.get(c.id)));
-});
+}, { guest: true });
 
 route('POST', '/api/courses', ({ me, body }) => {
   const input = courseInput(body);
@@ -731,14 +734,15 @@ route('POST', '/api/courses', ({ me, body }) => {
 });
 
 route('GET', '/api/courses/:id', ({ me, params }) => {
-  const course = getCourse(params.id, me.id);
+  const meId = me ? me.id : GUEST_ID;
+  const course = getCourse(params.id, meId);
   const posts = db.all(`SELECT ${POST_FIELDS} ${POST_FROM} WHERE p.course_id = $course AND p.deleted_at IS NULL
-      ORDER BY p.created_at DESC`, { me: me.id, course: course.id }).map(postSummary);
+      ORDER BY p.created_at DESC`, { me: meId, course: course.id }).map(postSummary);
   const deleted = db.all(`SELECT id, type, title, deleted_at FROM posts WHERE course_id = $course AND deleted_at IS NOT NULL
       AND deleted_at >= $since ORDER BY deleted_at DESC LIMIT 10`, { course: course.id, since: isoAt(Date.now() - 30 * DAY) })
     .map(p => ({ id: p.id, type: p.type, title: p.title, deletedAt: p.deleted_at }));
   return { course, posts, deleted };
-});
+}, { guest: true });
 
 route('PATCH', '/api/courses/:id', ({ me, params, body }) => {
   const c = db.one('SELECT * FROM courses WHERE id = $id AND archived = 0', { id: params.id });
@@ -798,7 +802,7 @@ route('POST', '/api/posts', ({ me, body }) => {
   return postDetail(id, me.id);
 });
 
-route('GET', '/api/posts/:id', ({ me, params }) => postDetail(params.id, me.id));
+route('GET', '/api/posts/:id', ({ me, params }) => postDetail(params.id, me ? me.id : GUEST_ID), { guest: true });
 
 const FIELD_LABELS = { type: 'type', title: 'title', body: 'details', due_at: 'date', has_time: 'date', due_date: 'date', location: 'location', weight: 'weight' };
 
@@ -849,7 +853,7 @@ route('GET', '/api/posts/:id/history', ({ params }) => {
     post: { id: p.id, title: p.title, type: p.type, version: p.version, deleted: !!p.deleted_at, course: { id: p.course_id, code: p.code, name: p.name, color: p.color } },
     versions,
   };
-});
+}, { guest: true });
 
 route('PUT', '/api/posts/:id/vote', ({ me, params, body }) => {
   const post = livePost(params.id);
